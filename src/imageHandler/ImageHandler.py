@@ -1,6 +1,6 @@
 from PIL import Image
-from image_description.imageHandler.ImageExtractor import ImageExtractor
-from image_description.imageHandler.ImageProcessor import ImageProcessor
+from imageHandler.ImageExtractor import ImageExtractor
+from imageHandler.ImageProcessor import ImageProcessor
 from typing import List, Tuple
 
 
@@ -19,8 +19,9 @@ class ImageHandler:
             return self._instance
 
     def process_images(self) -> List[Tuple[str, str]]:
-        images = self.image_extractor.load_images()
-        return [self.image_processor.create_image_label(image) for image in images]
+        images = self.image_extractor.extract_images()
+        print(images)
+        # return [self.image_processor.create_image_label(image) for image in images]
 
     def process_image(self, image: Image.Image) -> Tuple[str, str]:
         return self.image_processor.create_image_label(image)

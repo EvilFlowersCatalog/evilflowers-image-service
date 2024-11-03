@@ -3,7 +3,7 @@ from typing import List
 from pdf2image import convert_from_path
 import pytesseract
 import os
-
+import pdfplumber
 
 class ImageExtractor:
 
@@ -11,47 +11,47 @@ class ImageExtractor:
     images: List[Image.Image]
 
     def __init__(self, document_path: str):
-        self._validate()
-        self.document_path = document_path
+        self._validate(document_path)
+        self._document_path = document_path
 
     def set_document_path(self, document_path: str):
-        self.document_path = document_path
+        self._document_path = document_path
 
-    def extract_image(self, page: Image.Image) -> List[Image.Image]:
-        # Use pytesseract to find image bounding boxes
-        image_data = pytesseract.image_to_data(
-            page, output_type=pytesseract.Output.DICT
-        )
-
+    def extract_image(self, page: Image.Image, imageResolution: int = 400) -> List[Image.Image]:
+        
         extracted_images = []
-        for i, conf in enumerate(image_data["conf"]):
-            if (
-                conf == "-1"
-            ):  # '-1' confidence usually indicates a non-text area, potentially an image
-                left = image_data["left"][i]
-                top = image_data["top"][i]
-                width = image_data["width"][i]
-                height = image_data["height"][i]
+        images = page.images
 
-                # Crop the image
-                cropped_image = page.crop((left, top, left + width, top + height))
-                extracted_images.append(cropped_image)
-
+        # Save extracted images
+        if images:
+            for i, image in enumerate(images):
+                page_num = image["page_number"]
+                page_height = page.height
+                image_bbox = (image['x0'], page_height - image['y1'], image['x1'], page_height - image['y0'])
+                cropped_page = page.crop(image_bbox)
+                image_object = cropped_page.to_image(resolution=imageResolution)
+                extracted_images.append(image_object)
+                
         return extracted_images
 
+
     def extract_images(self) -> List[Image.Image]:
-        pages = self._load_document()
+        doc, pages = self._load_document()
         all_images = []
         for page in pages:
             all_images.extend(self.extract_image(page))
         self.images = all_images
+
+        doc.close()
         return all_images
 
     ##
     # Private functions
     def _load_document(self) -> List[Image.Image]:
-        return convert_from_path(self.document_path)
-
+        doc = pdfplumber.open(self._document_path)
+        return doc, doc.pages
+        # return convert_from_path(self.document_path)
+    
     def _validate(self, document_path: str):
         assert os.path.exists(
             document_path
