@@ -1,0 +1,10 @@
+pdfplumber
+PyPDF2
+camelot-py
+plotly
+itables
+ipywidgets
+pytesseract
+pdf2image
+transformers
+torch
