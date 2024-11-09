@@ -1,9 +1,9 @@
 from PIL import Image
 import torch
 from transformers import PaliGemmaForConditionalGeneration, AutoProcessor
+from domain.base.ModelInterface import ModelInterface
 
-
-class PaliGemmaModel:
+class PaliGemmaModel(ModelInterface):
 
     _instance = None
     model: PaliGemmaForConditionalGeneration
@@ -20,7 +20,7 @@ class PaliGemmaModel:
             return self._instance
 
 
-    def preprocess_data():
+    def preprocess_data(self):
         pass
 
 

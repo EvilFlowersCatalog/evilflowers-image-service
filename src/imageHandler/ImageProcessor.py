@@ -1,8 +1,13 @@
 from PIL import Image
 from typing import List, Tuple
-from models.PaliGemma import PaliGemmaModel
+
+from domain.models.PaliGemma import PaliGemmaModel
+from config.Config import Config
 
 class ImageProcessor:
+
+    config = Config()
+
     def __init__(self):
         pass
 
@@ -17,8 +22,16 @@ class ImageProcessor:
     ##
     # Private functions
     def _create_image_caption(self, image: Image) -> str:
-        model = PaliGemmaModel()
+        model = self._load_captioning_model()
+        print(image)
         return model.predict(image)
 
     def _create_image_label(self, image: Image) -> str:
         pass
+
+    def _load_captioning_model(self):
+        if self.config.get_config()['CAPTIONING_MODEL'] == 'PaliGemma':
+            model = PaliGemmaModel()
+        else:
+            raise ValueError(f"Model type {self.config.get_config()['CAPTIONING_MODEL']} not supported")
+        return model

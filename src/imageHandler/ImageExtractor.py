@@ -1,18 +1,23 @@
 from PIL import Image
 from typing import List
-from pdf2image import convert_from_path
-import pytesseract
 import os
 import pdfplumber
 
+from config.Config import Config
+from domain.base.ExtractorInterface import ExtractorInterface
+from domain.extractors.PdfPlumberExtractor import PdfPlumberExtractor
+
 class ImageExtractor:
 
+    config = Config()
     _document_path: str
+    _extractor: ExtractorInterface
     images: List[Image.Image]
 
     def __init__(self, document_path: str):
         self._validate(document_path)
         self._document_path = document_path
+        self._extractor = self._load_extractor()
 
     def set_document_path(self, document_path: str):
         self._document_path = document_path
@@ -29,7 +34,7 @@ class ImageExtractor:
                 page_height = page.height
                 image_bbox = (image['x0'], page_height - image['y1'], image['x1'], page_height - image['y0'])
                 cropped_page = page.crop(image_bbox)
-                image_object = cropped_page.to_image(resolution=imageResolution)
+                image_object = cropped_page.to_image(resolution=imageResolution).original
                 extracted_images.append(image_object)
                 
         return extracted_images
@@ -39,7 +44,7 @@ class ImageExtractor:
         doc, pages = self._load_document()
         all_images = []
         for page in pages:
-            all_images.extend(self.extract_image(page))
+            all_images.extend(self._extractor.extract_image(page))
         self.images = all_images
 
         doc.close()
@@ -56,3 +61,10 @@ class ImageExtractor:
         assert os.path.exists(
             document_path
         ), f"Document path did not found: {document_path}"
+
+    def _load_extractor(self):
+        if self.config.get_config()['EXTRACTOR_MODEL'] == 'PdfPlumber':
+            extractor = PdfPlumberExtractor()
+        else:
+            raise ValueError(f"Extractor type {self.config.get_config()['EXTRACTOR_MODEL']} not supported")
+        return extractor
