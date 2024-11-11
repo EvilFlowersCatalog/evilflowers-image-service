@@ -20,3 +20,8 @@ make run
 ```
 python src/main.py
 ```
+
+# Requirements
+- Python 3.12
+- pip
+- make

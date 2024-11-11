@@ -1,4 +1,4 @@
-from imageHandler.ImageHandler import ImageHandler
+from imageHandler.ImageService import ImageHandler
 
 
 def main():
