@@ -2,6 +2,8 @@ from PIL import Image
 from typing import List, Tuple
 
 from domain.models.PaliGemma import PaliGemmaModel
+from domain.models.VisionTransformer import VisionTransformerModel
+from domain.models.ResNet50 import ResNet50Model
 from config.Config import Config
 
 class ImageProcessor:
@@ -27,11 +29,22 @@ class ImageProcessor:
         return model.predict(image)
 
     def _create_image_label(self, image: Image) -> str:
-        pass
+        model = self._load_labeling_model()
+        return model.predict(image)
 
     def _load_captioning_model(self):
         if self.config.get_config()['CAPTIONING_MODEL'] == 'PaliGemma':
             model = PaliGemmaModel()
         else:
             raise ValueError(f"Model type {self.config.get_config()['CAPTIONING_MODEL']} not supported")
+        return model
+    
+    def _load_labeling_model(self):
+        match self.config.get_config()['LABELING_MODEL']:
+            case 'VisionTransformer':
+                model = VisionTransformerModel()
+            case 'ResNet50':
+                model = ResNet50Model()
+            case _:
+                raise ValueError(f"Model type {self.config.get_config()['LABELING_MODEL']} not supported")
         return model

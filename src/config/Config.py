@@ -18,6 +18,7 @@ class Config:
         self._config = {
             'CAPTIONING_MODEL': os.getenv('CAPTIONING_MODEL'),
             'EXTRACTOR_MODEL': os.getenv('EXTRACTOR_MODEL'),
+            'LABELING_MODEL': os.getenv('LABELING_MODEL'),
         }
 
     def get_config(self):
