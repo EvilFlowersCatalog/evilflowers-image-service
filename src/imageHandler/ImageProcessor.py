@@ -25,7 +25,6 @@ class ImageProcessor:
     # Private functions
     def _create_image_caption(self, image: Image) -> str:
         model = self._load_captioning_model()
-        print(image)
         return model.predict(image)
 
     def _create_image_label(self, image: Image) -> str:
