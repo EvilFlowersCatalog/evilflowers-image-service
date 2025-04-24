@@ -6,6 +6,7 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     build-essential \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
@@ -22,4 +23,4 @@ RUN mkdir temp
 EXPOSE 8000
 
 # Run the FastAPI application
-CMD ["python", "src/api.py"] 
+CMD ["python", "src/consumer.py"] 
