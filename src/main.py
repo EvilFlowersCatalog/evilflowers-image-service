@@ -7,5 +7,6 @@ def main():
     return image_handler.process_images()
 
 if __name__ == "__main__":
-    predictions = main()
+    predictions, page_numbers = main()
     print(predictions)
+    print(page_numbers)

@@ -40,15 +40,24 @@ class ImageExtractor:
         return extracted_images
 
 
-    def extract_images(self) -> List[Image.Image]:
+    def extract_images(self) -> tuple[List[Image.Image], List[int]]:
         doc, pages = self._load_document()
         all_images = []
+        page_numbers = []
+
         for page in pages:
-            all_images.extend(self._extractor.extract_image(page))
+            images = self._extractor.extract_image(page)
+            all_images.extend(images)
+
+            # Get the page number 
+            current_page_num = page.page_number
+            page_numbers.extend([current_page_num] * len(images))
+
         self.images = all_images
+        self.page_numbers = page_numbers
 
         doc.close()
-        return all_images
+        return all_images, page_numbers
 
     ##
     # Private functions

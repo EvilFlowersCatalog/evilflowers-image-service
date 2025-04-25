@@ -19,9 +19,9 @@ class ImageHandler:
             return self._instance
 
     def process_images(self) -> List[Tuple[str, str]]:
-        images = self.image_extractor.extract_images()
+        images, page_numbers = self.image_extractor.extract_images()
         predictions = self.image_processor.process_images(images)
-        return predictions
+        return predictions, page_numbers
 
     def process_image(self, image: Image.Image) -> Tuple[str, str]:
         return self.image_processor.create_image_label(image)
