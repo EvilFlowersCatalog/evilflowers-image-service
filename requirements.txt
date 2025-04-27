@@ -15,5 +15,8 @@ fastapi
 uvicorn
 python-multipart
 
-# Kafka
-confluent-kafka
+# Elasticsearch
+elasticsearch
+kibana
+git+https://github.com/0Kozlik0/EvilFlowerElasticsearch.git@main#egg=elvira_elasticsearch_client
+confluent_kafka
