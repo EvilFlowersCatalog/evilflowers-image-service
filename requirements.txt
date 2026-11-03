@@ -1,22 +1,5 @@
-pdfplumber==0.11.4
-PyPDF2==3.0.1
-camelot-py==0.11.0
-plotly==5.24.1
-itables==2.2.3
-ipywidgets==8.1.5
-pytesseract==0.3.13
-pdf2image==1.17.0
-transformers==4.46.1
-torch==2.5.1
-python-dotenv==1.0.1
-
-# API
-fastapi
-uvicorn
-python-multipart
-
-# Elasticsearch
-elasticsearch
-kibana
-git+https://github.com/0Kozlik0/EvilFlowerElasticsearch.git@main#egg=elvira_elasticsearch_client
-confluent_kafka
+python-dotenv>=1.0
+celery[redis]>=5.4
+requests>=2.32
+pymupdf>=1.24
+pillow>=10.4
