@@ -33,6 +33,7 @@ def test_crop_is_written_where_the_catalog_expects_it(storage):
         result = worker._figure(document, region, "catalogs/c/e/extraction/a/v1")
     assert result["image_path"] == "catalogs/c/e/extraction/a/v1/p001-fig03.webp"
     assert result["caption"] == "Fig. 1"
+    assert result["printed_caption"] == "Fig. 1"
     assert os.path.exists(storage / result["image_path"])
 
 

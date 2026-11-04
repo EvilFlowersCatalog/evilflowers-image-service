@@ -98,13 +98,12 @@ def _figure(document: fitz.Document, region: dict, output_dir: str) -> Optional[
     name = crops.crop_name(output_dir, region["page"], "fig", region["seq"])
     crops.save(image, name)
 
-    caption, category = region.get("caption"), None
+    printed_caption, description, category = region.get("caption"), None, None
     region_provenance = {}
     if settings.CAPTIONS_ENABLED:
         try:
-            described, category = captions.describe(image, region.get("caption"))
-            caption = described or caption
-            region_provenance = {"caption_model": settings.CAPTION_MODEL, "printed_caption": region.get("caption")}
+            description, category = captions.describe(image, printed_caption)
+            region_provenance = {"caption_model": settings.CAPTION_MODEL}
         except Exception:
             # The crop and its position are still worth keeping without a description.
             logger.exception("Caption failed for page %s", region["page"])
@@ -115,7 +114,11 @@ def _figure(document: fitz.Document, region: dict, output_dir: str) -> Optional[
         "seq": region["seq"],
         "bbox": region["bbox"],
         "image_path": name,
-        "caption": caption,
+        # The document's own caption and the model's description travel apart
+        # (IP-018 Phase 8); `caption` is kept for catalogs that predate them.
+        "caption": printed_caption or description,
+        "printed_caption": printed_caption,
+        "description": description,
         "category": category,
         "provenance": region_provenance,
     }
