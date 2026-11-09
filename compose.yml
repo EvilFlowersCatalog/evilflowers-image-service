@@ -1,0 +1,25 @@
+# Local development: Redis and the worker of this image. The catalog and the analyzer run from their own repos
+# and point at this Redis; STORAGE_PATH must be the same directory they read and write (./data here).
+# Captions need an Ollama endpoint: set CAPTIONS_ENABLED=1 and OLLAMA_ENDPOINT in .env (see .env.sample).
+#
+#   docker compose up --build
+
+services:
+  redis:
+    image: redis:7
+    ports:
+      - "6379:6379"
+
+  image:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      REDIS_URL: redis://redis:6379/7
+      STORAGE_PATH: /mnt/data
+      LOG_FORMAT: text
+    volumes:
+      - ./data:/mnt/data
+    depends_on:
+      - redis

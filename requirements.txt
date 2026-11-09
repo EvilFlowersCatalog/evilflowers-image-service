@@ -1,5 +1,0 @@
-python-dotenv>=1.0
-celery[redis]>=5.4
-requests>=2.32
-pymupdf>=1.24
-pillow>=10.4
