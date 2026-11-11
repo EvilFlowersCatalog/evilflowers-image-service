@@ -49,10 +49,10 @@ class FiguresJob:
 
     def extract(self) -> list[dict[str, Any]]:
         """Crop, gate and describe the regions. Raising (the PDF cannot be opened) fails the job."""
-        with span("figures.extract", **{"figures.regions": len(self.regions)}) as current:
+        with span("figures.extract", **{"evilflowers.figures.regions": len(self.regions)}) as current:
             kept = self.reader.read(self.settings.source_path(self.source), self.output_dir, self.regions)
             if current is not None:
-                current.set_attribute("figures.kept", len(kept))
+                current.set_attribute("evilflowers.figures.kept", len(kept))
         return kept
 
     def provenance(self) -> dict[str, Any]:
