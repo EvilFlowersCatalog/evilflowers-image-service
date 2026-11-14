@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     #: Seconds before Redis redelivers an unacknowledged message. The job acknowledges
     #: late, so this must outlast the longest book (captions make it slow).
     broker_visibility_timeout: int = 7200
+    #: Seconds a worker waits after SIGTERM before it cancels its task and Redis gets the message
+    #: back (soft shutdown, celery >= 5.5). Celery sleeps the whole interval, finished task or
+    #: not, so keep it short and below the pod's terminationGracePeriodSeconds. Takes effect
+    #: only with REMAP_SIGTERM=SIGQUIT in the process env (set in the Dockerfile); 0 disables it.
+    worker_soft_shutdown_timeout: float = 10.0
+    #: Wait the soft timeout even with no task running, so reserved (ETA) messages are restored too.
+    worker_enable_soft_shutdown_on_idle: bool = True
 
     # -- Storage and provenance -----------------------------------------------------
     #: The catalog's storage root: originals are read here, crops written.

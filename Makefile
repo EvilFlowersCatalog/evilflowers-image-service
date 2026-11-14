@@ -23,7 +23,7 @@ check: lint test
 
 # A local worker (needs a reachable REDIS_URL and STORAGE_PATH; CATALOG_API_* to report).
 worker:
-	uv run celery -A evilflowers_image.worker worker --loglevel=INFO -E --concurrency=1 --queues=evilflowers_image
+	REMAP_SIGTERM=SIGQUIT uv run celery -A evilflowers_image.worker worker --loglevel=INFO -E --concurrency=1 --queues=evilflowers_image
 
 image:
 	docker build --build-arg IMAGE_TAG=local@$$(git rev-parse --short HEAD) -t evilflowers-image-service:local .

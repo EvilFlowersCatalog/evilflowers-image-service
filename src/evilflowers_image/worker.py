@@ -43,6 +43,11 @@ class CeleryConfig:
         # run that finished meanwhile, so a second delivery is harmless.
         self.task_acks_late = True
         self.task_reject_on_worker_lost = True
+        # Safe scale-in (KEDA): with REMAP_SIGTERM=SIGQUIT, SIGTERM is a cold shutdown that waits this
+        # long, then cancels the unacknowledged task and kombu restores it to the queue at once instead
+        # of after the visibility timeout. Without the remap SIGTERM is warm and this is never used.
+        self.worker_soft_shutdown_timeout = settings.worker_soft_shutdown_timeout
+        self.worker_enable_soft_shutdown_on_idle = settings.worker_enable_soft_shutdown_on_idle
         # Monitoring (Flower, `celery events`).
         self.worker_send_task_events = True
         self.task_send_sent_event = True

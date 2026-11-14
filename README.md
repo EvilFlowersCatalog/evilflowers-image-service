@@ -110,6 +110,23 @@ The image's start command is `celery -A evilflowers_image.worker worker --loglev
 book, which it cannot do with `--pool=solo`. The image also ships a one-line `/app/src/worker.py` shim, so the dev
 manifest's old `celery --workdir src -A worker …` args keep working until knowledge#20 changes them.
 
+### Shutdown and scale-in
+
+KEDA scales the worker on its Redis list, so a pod can get SIGTERM in the middle of a book. The image sets
+`REMAP_SIGTERM=SIGQUIT`, which turns SIGTERM into Celery's cold shutdown with a soft timeout:
+
+1. The worker waits `WORKER_SOFT_SHUTDOWN_TIMEOUT` seconds (default 10). Celery sleeps for the whole interval even
+   if the task finishes sooner.
+2. It cancels the task, which is not yet acknowledged because the job acknowledges late.
+3. Kombu puts the message back on `evilflowers_image`, where another pod picks it up. It does not wait out
+   `BROKER_VISIBILITY_TIMEOUT`.
+
+The worker exits non-zero, which is how Celery ends a cold shutdown. The pod's `terminationGracePeriodSeconds` must
+be longer than the soft timeout. Without the remap, SIGTERM is a warm shutdown that waits for the whole book. If the
+grace period runs out first, the pod is killed and the book stays unacknowledged until the visibility timeout. Setting
+`WORKER_ENABLE_SOFT_SHUTDOWN_ON_IDLE` (default on) makes an idle worker wait the timeout too, so reserved messages
+are restored as well. `tests/test_shutdown.py` checks both cases against a real Redis.
+
 ## Observability
 
 The service follows the cluster's telemetry contract (knowledge base, `Cookbooks/Deploy-a-Service` §3). Everything is

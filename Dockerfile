@@ -34,8 +34,12 @@ COPY --from=build /app/.venv /app/.venv
 RUN mkdir /app/src && echo "from evilflowers_image.worker import app  # noqa: F401" > /app/src/worker.py
 
 ARG IMAGE_TAG=dev
+# REMAP_SIGTERM: SIGTERM (scale-in, rollout) becomes Celery's cold shutdown, so the soft shutdown
+# (WORKER_SOFT_SHUTDOWN_TIMEOUT) runs and the unacknowledged book goes back to the queue within seconds
+# instead of waiting for the visibility timeout. Billiard reads it from the environment at import.
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
+    REMAP_SIGTERM=SIGQUIT \
     IMAGE_TAG=${IMAGE_TAG}
 
 # Prefork with one child: Flower can inspect the worker while a book is being cropped (with --pool=solo it

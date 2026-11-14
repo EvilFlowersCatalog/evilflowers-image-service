@@ -27,6 +27,12 @@ def test_queue_routing_and_late_acknowledgement():
     assert conf.worker_prefetch_multiplier == 1
 
 
+def test_soft_shutdown_is_on_by_default():
+    conf = create_app(Settings(_env_file=None)).conf
+    assert conf.worker_soft_shutdown_timeout == 10.0
+    assert conf.worker_enable_soft_shutdown_on_idle is True
+
+
 def test_settings_keep_the_deployed_variable_names(monkeypatch):
     for name, value in {
         "IMAGE_QUEUE": "custom_queue",
@@ -34,6 +40,8 @@ def test_settings_keep_the_deployed_variable_names(monkeypatch):
         "CAPTIONS_ENABLED": "1",
         "MIN_SIDE_PX": "100",
         "CATALOG_API_KEY": "key",
+        "WORKER_SOFT_SHUTDOWN_TIMEOUT": "25",
+        "WORKER_ENABLE_SOFT_SHUTDOWN_ON_IDLE": "0",
     }.items():
         monkeypatch.setenv(name, value)
     settings = Settings(_env_file=None)
@@ -42,3 +50,5 @@ def test_settings_keep_the_deployed_variable_names(monkeypatch):
     assert settings.captions_enabled is True
     assert settings.min_side_px == 100
     assert settings.catalog_api_key.get_secret_value() == "key"
+    assert settings.worker_soft_shutdown_timeout == 25.0
+    assert settings.worker_enable_soft_shutdown_on_idle is False
