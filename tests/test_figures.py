@@ -1,8 +1,10 @@
 import pymupdf
 import pytest
+from evilflowers_worker.contract import Box
+from evilflowers_worker.jobs import Stop
 from PIL import Image
 
-from conftest import FIGURE_BOX
+from conftest import FIGURE_BOX, region
 from evilflowers_image import captions, crops
 from evilflowers_image.figures import FigureReader, gate
 
@@ -21,16 +23,16 @@ class FakeCaptioner:
 
 
 def test_gates(settings):
-    box = {"x0": 0.1, "y0": 0.1, "x1": 0.5, "y1": 0.5}
+    box = Box(x0=0.1, y0=0.1, x1=0.5, y1=0.5)
     assert gate(box, (300, 300), settings) is None
     assert gate(box, (50, 300), settings) == "too small"
     assert gate(box, (2000, 100), settings) == "extreme aspect ratio"
-    assert gate({"x0": 0, "y0": 0, "x1": 1, "y1": 0.95}, (900, 900), settings) == "covers the page"
+    assert gate(Box(x0=0, y0=0, x1=1, y1=0.95), (900, 900), settings) == "covers the page"
 
 
 def test_rect_uses_top_left_origin():
     page = pymupdf.open().new_page(width=200, height=100)
-    assert crops.rect({"x0": 0, "y0": 0, "x1": 0.5, "y1": 0.5}, page) == pymupdf.Rect(0, 0, 100, 50)
+    assert crops.rect(Box(x0=0, y0=0, x1=0.5, y1=0.5), page) == pymupdf.Rect(0, 0, 100, 50)
 
 
 def test_crop_name():
@@ -38,23 +40,27 @@ def test_crop_name():
 
 
 def test_crop_is_written_where_the_catalog_expects_it(settings, pdf):
-    region = {"page": 1, "seq": 3, "bbox": FIGURE_BOX, "caption": "Fig. 1"}
-    [figure] = FigureReader(settings).read(settings.source_path(pdf), "catalogs/c/e/extraction/a/v1", [region])
-    assert figure["image_path"] == "catalogs/c/e/extraction/a/v1/p001-fig03.webp"
-    assert (settings.storage_path / figure["image_path"]).exists()
-    assert figure["kind"] == "figure" and figure["bbox"] == FIGURE_BOX
-    assert figure["caption"] == figure["printed_caption"] == "Fig. 1"
-    assert figure["description"] is None and figure["category"] is None and figure["provenance"] == {}
+    reader = FigureReader(settings)
+    [figure] = reader.read(
+        settings.source_path(pdf), "catalogs/c/e/extraction/a/v1", [region(seq=3, caption="Fig. 1")]
+    )
+    assert figure.image_path == "catalogs/c/e/extraction/a/v1/p001-fig03.webp"
+    crop = settings.storage_path / figure.image_path
+    assert crop.exists() and not crop.with_name(crop.name + ".partial").exists()
+    assert Image.open(crop).format == "WEBP"
+    assert figure.kind == "figure" and figure.bbox == Box(**FIGURE_BOX)
+    assert figure.caption == figure.printed_caption == "Fig. 1"
+    assert figure.description is None and figure.category is None and figure.provenance == {}
 
 
 def test_dropped_and_broken_regions_are_skipped(settings, pdf):
     regions = [
-        {"page": 1, "seq": 1, "bbox": {"x0": 0.1, "y0": 0.1, "x1": 0.12, "y1": 0.12}},  # too small
-        {"page": 9, "seq": 2, "bbox": FIGURE_BOX},  # no such page
-        {"page": 1, "seq": 3, "bbox": FIGURE_BOX},
+        region(seq=1, bbox={"x0": 0.1, "y0": 0.1, "x1": 0.12, "y1": 0.12}),  # too small
+        region(page=9, seq=2),  # no such page
+        region(seq=3),
     ]
     kept = FigureReader(settings).read(settings.source_path(pdf), "out", regions)
-    assert [figure["seq"] for figure in kept] == [3]
+    assert [figure.seq for figure in kept] == [3]
 
 
 def test_an_unreadable_pdf_raises(settings):
@@ -63,22 +69,41 @@ def test_an_unreadable_pdf_raises(settings):
         FigureReader(settings).read(settings.source_path("broken.pdf"), "out", [])
 
 
+@pytest.mark.parametrize("output_dir", ["../outside", "/etc", "a/../../outside", ""])
+def test_an_output_dir_outside_the_storage_is_refused_before_anything_is_written(settings, pdf, output_dir):
+    with pytest.raises(ValueError, match="STORAGE_PATH"):
+        FigureReader(settings).read(settings.source_path(pdf), output_dir, [region()])
+    assert [path.name for path in settings.storage_path.iterdir()] == ["doc.pdf"]
+    assert not (settings.storage_path.parent / "outside").exists()
+
+
+def test_a_stop_between_regions_ends_the_work_instead_of_skipping_a_figure(settings, pdf):
+    calls = []
+
+    def between():
+        calls.append(1)
+        if len(calls) == 2:
+            raise Stop("superseded")
+
+    with pytest.raises(Stop):
+        FigureReader(settings).read(settings.source_path(pdf), "out", [region(seq=1), region(seq=2)], between=between)
+    assert [path.name for path in (settings.storage_path / "out").iterdir()] == ["p001-fig01.webp"]
+
+
 def test_the_description_travels_apart_from_the_printed_caption(settings, pdf):
     captioner = FakeCaptioner()
-    region = {"page": 1, "seq": 1, "bbox": FIGURE_BOX, "caption": None}
-    [figure] = FigureReader(settings, captioner).read(settings.source_path(pdf), "out", [region])
+    [figure] = FigureReader(settings, captioner).read(settings.source_path(pdf), "out", [region()])
     assert captioner.calls[0][1] is None
-    assert figure["printed_caption"] is None
-    assert figure["description"] == figure["caption"] == "A blue square."
-    assert figure["category"] == "drawing"
-    assert figure["provenance"] == {"caption_model": "fake-vl"}
+    assert figure.printed_caption is None
+    assert figure.description == figure.caption == "A blue square."
+    assert figure.category == "drawing"
+    assert figure.provenance == {"caption_model": "fake-vl"}
 
 
 def test_a_failing_caption_keeps_the_crop(settings, pdf):
-    region = {"page": 1, "seq": 1, "bbox": FIGURE_BOX, "caption": "Fig. 2"}
     reader = FigureReader(settings, FakeCaptioner(error=TimeoutError("ollama")))
-    [figure] = reader.read(settings.source_path(pdf), "out", [region])
-    assert figure["caption"] == "Fig. 2" and figure["description"] is None and figure["provenance"] == {}
+    [figure] = reader.read(settings.source_path(pdf), "out", [region(caption="Fig. 2")])
+    assert figure.caption == "Fig. 2" and figure.description is None and figure.provenance == {}
 
 
 def test_caption_answer_parsing():

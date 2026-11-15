@@ -12,11 +12,12 @@ The task name, queue and argument shape are a contract with their callers (`test
 
 | Task | Queue | Sent by | Does |
 |---|---|---|---|
-| `evilflowers_image.figures` | `evilflowers_image` (`IMAGE_QUEUE`) | analyzer, kwargs `run_id, source, output_dir, regions` | Crops, gates and optionally describes each figure region. Posts the kept ones to `/regions`, then reports `/jobs/figures`. |
+| `evilflowers_image.figures` | `evilflowers_image` (`IMAGE_QUEUE`) | analyzer, kwargs `run_id, source, output_dir, regions[, job, attempt]` (`RegionsJob`) | Crops, gates and optionally describes each figure region. Posts the kept ones to `/regions`, then reports `/jobs/<job>`. |
 
 `regions` is `[{page, seq, bbox: {x0, y0, x1, y1}, caption}]`: page fractions with a top-left origin on the 1-based
-page. `caption` is the caption printed in the document, if the analyzer found one. Unknown kwargs are ignored. For
-each region the job:
+page. `caption` is the caption printed in the document, if the analyzer found one. `job` is the catalog job to report
+under: a layout batch such as `figures:0001-0008`, or `figures` when absent. `attempt` comes from the catalog's
+`/start`; it goes back as `?attempt=` on every write. Unknown kwargs are ignored. For each region the job:
 
 1. renders the box at `CROP_DPI` (144);
 2. drops it if its shorter side is under `MIN_SIDE_PX` (80), its aspect ratio is over `MAX_ASPECT_RATIO` (8), or it
@@ -29,15 +30,23 @@ each region the job:
 Each region is posted with `kind: figure`, `image_path`, `bbox`, `printed_caption`, `description`, `category` and
 `caption` (`printed_caption or description`, kept for catalogs that predate the split).
 
-The job follows the IP-018 protocol of the sibling services (`jobs.FiguresJob.run`):
+The job is an [evilflowers-worker](https://github.com/EvilFlowersCatalog/evilflowers-worker) leaf job
+(`FiguresJob(LeafJob[RegionsJob, list[Region]])`, design in the kit's `docs/architecture.md`). The kit runs the
+lifecycle; this service writes `extract` (crop, gate, caption) and `publish` (`/regions`):
 
-- **The job always reports `done` or `failed`**, because a run finishes only when every declared job has
-  reported. A region that fails is logged and skipped. The job fails when the PDF cannot be opened or the catalog
-  rejects the results.
-- **A 409 is the exception.** It means the catalog no longer accepts the run, and the job stops quietly. Crops
-  already written stay until the catalog deletes the run's folder.
-- **Late acknowledgement** (`acks_late`, `reject_on_worker_lost`). If the worker dies mid-book, the message is
-  delivered again.
+1. **Delivery cap.** A message delivered more than `MAX_DELIVERIES` (5) times killed its worker every time. It is
+   reported `failed` instead of run again.
+2. **Run check.** `GET runs/<id>` before the work. A copy of a job already reported (`already_done`), a run no longer
+   running (`not_running`) or a superseded attempt (`superseded`) stops before anything is cropped. Between regions
+   the job checks again every 5 minutes, so a long book with captions stops when the run moves on.
+3. **The job always reports `done` or `failed`**, because a run finishes only when every declared job has reported. An
+   empty batch (`regions: []`) reports `done` too. A region that fails is logged and skipped. The job fails when the
+   PDF cannot be opened, `output_dir` points outside `STORAGE_PATH`, or the catalog rejects the results.
+4. **A 409 is the exception.** The catalog no longer wants the results, and the job stops quietly (`superseded` is
+   reported as such and counted). Crops already written stay until the catalog deletes the run's folder.
+
+Every crop path is resolved under `STORAGE_PATH` (`storage_file`, which refuses `..`, absolute paths and escaping
+symlinks) and written atomically (`.partial`, fsync, rename), so a half-written crop never exists.
 
 PaliGemma and the ViT/ResNet labellers of the earlier prototype are gone. Captions come from a multimodal LLM
 (IP-018 Q8), which on a CPU host means an Ollama endpoint. Which model to use is still open, and captions are off in
@@ -47,19 +56,19 @@ dev.
 
 ```
 src/evilflowers_image/
-├── worker.py          Celery app (`celery -A evilflowers_image.worker worker`), config and routes
-├── tasks.py           the `evilflowers_image.figures` task (thin adapter)
-├── jobs.py            the IP-018 job protocol (extract → publish → report) for figures
+├── worker.py          Celery app (`celery -A evilflowers_image.worker worker`): the kit's `create_app("image", …)`
+├── tasks.py           the `evilflowers_image.figures` task: `run_job(self, FiguresJob, RegionsJob, kwargs)`
+├── jobs.py            `FiguresJob`: extract (crop, gate, caption) and publish
 ├── figures.py         gates and one region → one figure (crop, optional caption)
-├── crops.py           page geometry, rendering, WebP names and writes
+├── crops.py           page geometry, rendering, WebP names and atomic writes
 ├── captions.py        the Ollama captioner and the answer parser
-├── settings.py        typed settings from the environment (pydantic-settings)
-├── clients/           catalog ingestion API, shared HTTP session
-└── observability/     OpenTelemetry setup, spans, metrics, JSON logs, Pyroscope profiling, Celery signal wiring
+├── metrics.py         the figures' own metrics (regions, caption duration)
+└── settings.py        `Settings(WorkerSettings)`: the figures' own fields
 ```
 
-It is the same layout as `evilflowers-text-service`. `observability/` is a copy of the text service's, with the
-`image` names.
+The Celery configuration, the catalog client, the job protocol, shutdown, the delivery cap and observability are all
+evilflowers-worker's, pinned to a commit in `pyproject.toml` (`[tool.uv.sources]`). To move the pin, change `rev` and
+run `uv lock --upgrade-package evilflowers-worker`.
 
 ## Development
 
@@ -68,7 +77,7 @@ the `profiling` extra adds the Pyroscope SDK.
 
 ```bash
 make install        # core + dev tools (ruff, pytest): enough for the tests
-make check          # ruff check, ruff format --check, pytest
+make check          # ruff check, ruff format --check, pytest (TEST_REDIS_URL for the real-worker tests)
 make install-all    # everything the image has
 make worker         # a local worker (REDIS_URL, STORAGE_PATH, CATALOG_API_* from .env)
 make image          # docker build, tagged evilflowers-image-service:local
@@ -78,12 +87,22 @@ docker compose up --build    # Redis + image
 To bump a dependency, run `uv lock --upgrade-package <name>`. `pymupdf` stays below 2: version 2.x hard-depends on
 onnxruntime and a layout model, and this worker only renders crops.
 
+Tests use the kit's `evilflowers_worker.testing`. `test_jobs.py` runs the job against `FakeCatalog`.
+`test_end_to_end.py` runs a real prefork worker (`WorkerProcess`) against Redis (`TEST_REDIS_URL`, default
+`redis://localhost:6379/15`; `docker compose up -d redis`) and a `StubCatalogServer`. It covers the batch job name,
+`?attempt=`, an empty batch, and a book that kills its worker ending `failed` after `MAX_DELIVERIES`. Without Redis
+these tests are skipped, except in CI, where they fail.
+
 ## Configuration
 
 All settings are environment variables. `.env.sample` lists them, and `src/evilflowers_image/settings.py` has their
 defaults and meaning. The ones a deployment sets:
 
 - `REDIS_URL`
+- `BROKER_VISIBILITY_TIMEOUT`: 43200 (the default), one value for every consumer of the Redis db
+- `WORKER_SOFT_SHUTDOWN_TIMEOUT` (60) and `WORKER_CANCEL_TIMEOUT` (30). Their sum must stay under the pod's
+  `terminationGracePeriodSeconds`.
+- `MAX_DELIVERIES` (5)
 - `STORAGE_PATH`, the catalog's storage root, mounted read/write
 - `CATALOG_API_URL` and `CATALOG_API_KEY`, the key of a catalog user holding `extraction.ingest_extraction`
 - `CAPTIONS_ENABLED`, `OLLAMA_ENDPOINT`, `OLLAMA_API_KEY` and `CAPTION_MODEL`, only when captions are on
@@ -112,20 +131,18 @@ manifest's old `celery --workdir src -A worker …` args keep working until know
 
 ### Shutdown and scale-in
 
-KEDA scales the worker on its Redis list, so a pod can get SIGTERM in the middle of a book. The image sets
-`REMAP_SIGTERM=SIGQUIT`, which turns SIGTERM into Celery's cold shutdown with a soft timeout:
+KEDA scales the worker on its Redis list, so a pod can get SIGTERM in the middle of a book. Shutdown is
+evilflowers-worker's (`evilflowers_worker.shutdown`), and nothing in the image or the manifest may set `REMAP_SIGTERM`:
 
-1. The worker waits `WORKER_SOFT_SHUTDOWN_TIMEOUT` seconds (default 10). Celery sleeps for the whole interval even
-   if the task finishes sooner.
-2. It cancels the task, which is not yet acknowledged because the job acknowledges late.
-3. Kombu puts the message back on `evilflowers_image`, where another pod picks it up. It does not wait out
-   `BROKER_VISIBILITY_TIMEOUT`.
+1. An idle worker exits at once.
+2. A running book goes on for up to `WORKER_SOFT_SHUTDOWN_TIMEOUT` seconds. If it finishes, it is acknowledged and the
+   worker exits, so a finished book is not done again.
+3. Otherwise the job is cancelled. The message is not yet acknowledged, so it goes straight back on
+   `evilflowers_image` instead of waiting out `BROKER_VISIBILITY_TIMEOUT`. If the cancel takes longer than
+   `WORKER_CANCEL_TIMEOUT`, the worker requeues the message itself and exits.
 
-The worker exits non-zero, which is how Celery ends a cold shutdown. The pod's `terminationGracePeriodSeconds` must
-be longer than the soft timeout. Without the remap, SIGTERM is a warm shutdown that waits for the whole book. If the
-grace period runs out first, the pod is killed and the book stays unacknowledged until the visibility timeout. Setting
-`WORKER_ENABLE_SOFT_SHUTDOWN_ON_IDLE` (default on) makes an idle worker wait the timeout too, so reserved messages
-are restored as well. `tests/test_shutdown.py` checks both cases against a real Redis.
+A deliberate requeue does not count towards `MAX_DELIVERIES`; a worker that dies (OOM) does. The kit's own test suite
+checks this against a real Redis.
 
 ## Observability
 
@@ -134,19 +151,22 @@ off unless the pod points it at a collector, and it starts in `worker_process_in
 the task.
 
 - **Traces.** Every task gets a CONSUMER span that continues the caller's `traceparent`. Every catalog or Ollama call
-  gets a CLIENT span that carries it on. Hand-made spans cover `figures.extract` (regions in, figures kept) and each
-  `figures.caption`. The endpoint comes from `OTEL_EXPORTER_OTLP_ENDPOINT`, or from `HOST_IP` when only that is set;
+  gets a CLIENT span that carries it on, except the Ollama calls: there is one per figure, so they have no spans,
+  which keeps the trace of a book with many batches under Tempo's size limit. The hand-made span is `figures.extract`
+  (regions in, figures kept). The endpoint comes from `OTEL_EXPORTER_OTLP_ENDPOINT`, or from `HOST_IP` when only that is set;
   with neither, tracing is off. Sampling follows `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG`
   (`parentbased_traceidratio` in k8s). A failed job marks its span as an error.
 - **Metrics** (Mimir):
   - `image_task_duration_seconds`
-  - `image_job_outcome_total{job,outcome}` (`done`, `failed`, `not_running`)
+  - `image_job_outcome_total{job,outcome}`, where `job` is the kind (`figures`), never a batch name, and `outcome`
+    is `done`, `failed`, `not_running`, `superseded` or `already_done`
+  - `image_deliveries_capped_total`
   - `image_figures_regions_total{outcome}` (`kept`, `too_small`, `extreme_aspect_ratio`, `covers_the_page`, `error`)
   - `image_caption_duration_seconds{model,outcome}`
-  - `image_catalog_retries_total`
+  - `image_catalog_retries_total{route,reason}`
   - process CPU and memory
 - **Logs.** Each log line is one JSON object on stdout, with `level`, `trace_id`/`span_id`, `task_name`/`task_id`
-  and the job's `run_id`, `job` and `source`. Set `LOG_FORMAT=text` for a terminal.
+  and the job's `run_id`, `job`, `attempt`, `delivery` and `source`. Set `LOG_FORMAT=text` for a terminal.
 - **Profiles** (Pyroscope). The node's eBPF profiler cannot unwind Python on k3s `control`, so the worker profiles
   itself with the Pyroscope SDK when `PYROSCOPE_SERVER_ADDRESS` is set. `PYROSCOPE_APPLICATION_NAME` defaults to
   `image`, and `PYROSCOPE_TAGS` takes `k=v` pairs separated by commas. Each trace's root span links to its profile.

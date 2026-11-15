@@ -6,6 +6,9 @@ readme = "README.md"
 authors = [{ name = "Jakub Dubec", email = "jakub.dubec@stuba.sk" }]
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    # The shared extraction-worker runtime: Celery app, job protocol, catalog client, shutdown, delivery cap,
+    # observability. Pinned to a commit in [tool.uv.sources].
+    "evilflowers-worker",
     "celery[redis]>=5.6,<6",
     "pillow>=11",
     "pydantic>=2.12,<3",
@@ -14,24 +17,13 @@ dependencies = [
     "pymupdf>=1.26,<2",
     "python-dotenv>=1.0",
     "requests>=2.32",
-    # IP-019: code uses the API only, a no-op without the `otel` extra. One release train with the catalog.
-    "opentelemetry-api==1.45.2",
 ]
 
 [project.optional-dependencies]
-# OTLP/HTTP to the node's Alloy; SDK/exporter 1.x and contrib 0.yb0 move together (as in the catalog).
-otel = [
-    "opentelemetry-sdk==1.45.2",
-    "opentelemetry-exporter-otlp-proto-http==1.45.2",
-    "opentelemetry-instrumentation-celery==0.66b2",
-    "opentelemetry-instrumentation-requests==0.66b2",
-    "opentelemetry-instrumentation-system-metrics==0.66b2",
-]
+# OTLP/HTTP to the node's Alloy (the kit pins the SDK, exporter and instrumentations).
+otel = ["evilflowers-worker[otel]"]
 # Pyroscope SDK: Python frames the node's eBPF profiler cannot unwind; on only with PYROSCOPE_SERVER_ADDRESS.
-profiling = [
-    "pyroscope-io==1.4.0",
-    "pyroscope-otel==1.1.0",
-]
+profiling = ["evilflowers-worker[profiling]"]
 
 [dependency-groups]
 # `uv sync` installs the core and this group only.
@@ -40,6 +32,9 @@ dev = [
     "pytest>=8.3",
     "ruff>=0.14",
 ]
+
+[tool.uv.sources]
+evilflowers-worker = { git = "https://github.com/EvilFlowersCatalog/evilflowers-worker", rev = "c37d860513662adcb85794adabea39af456ffee8" }
 
 [build-system]
 requires = ["hatchling>=1.27"]

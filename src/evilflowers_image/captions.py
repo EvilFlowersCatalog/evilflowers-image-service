@@ -2,6 +2,10 @@
 
 The model sees the crop and the caption printed next to it in the document,
 and answers JSON: a one- or two-sentence description and one category.
+
+One request per figure, so no span per figure either: a book (or a batch) can hold hundreds, and the trace must stay
+under Tempo's size limit (text#10). The time goes to the ``figures.extract`` span and the
+``image_caption_duration_seconds`` histogram.
 """
 
 import base64
@@ -10,10 +14,11 @@ import json
 import time
 
 import requests
+from evilflowers_worker.http import session
+from evilflowers_worker.observability import untraced_http
 from PIL import Image
 
-from evilflowers_image.clients.http import session
-from evilflowers_image.observability import metrics, span
+from evilflowers_image import metrics
 from evilflowers_image.settings import Settings, get_settings
 
 CATEGORIES = ("chart", "diagram", "photo", "map", "drawing", "screenshot", "other")
@@ -70,7 +75,7 @@ class OllamaCaptioner:
         }
         started, outcome = time.perf_counter(), "error"
         try:
-            with span("figures.caption", **{"gen_ai.request.model": self.model}):
+            with untraced_http():
                 response = self.http.post(
                     self.settings.ollama_endpoint, json=payload, timeout=self.settings.caption_timeout
                 )

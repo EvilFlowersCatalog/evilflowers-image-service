@@ -5,6 +5,11 @@ FROM python:3.12-slim AS build
 
 COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /bin/uv
 
+# evilflowers-worker is a git dependency (pinned commit in uv.lock); uv clones it with the git CLI.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git && \
+    rm -rf /var/lib/apt/lists/*
+
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never \
@@ -34,12 +39,10 @@ COPY --from=build /app/.venv /app/.venv
 RUN mkdir /app/src && echo "from evilflowers_image.worker import app  # noqa: F401" > /app/src/worker.py
 
 ARG IMAGE_TAG=dev
-# REMAP_SIGTERM: SIGTERM (scale-in, rollout) becomes Celery's cold shutdown, so the soft shutdown
-# (WORKER_SOFT_SHUTDOWN_TIMEOUT) runs and the unacknowledged book goes back to the queue within seconds
-# instead of waiting for the visibility timeout. Billiard reads it from the environment at import.
+# No REMAP_SIGTERM: SIGTERM (scale-in, rollout) is evilflowers-worker's shutdown. The job runs on for
+# WORKER_SOFT_SHUTDOWN_TIMEOUT, then it is cancelled and requeued at once (WORKER_CANCEL_TIMEOUT at most).
 ENV PATH=/app/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
-    REMAP_SIGTERM=SIGQUIT \
     IMAGE_TAG=${IMAGE_TAG}
 
 # Prefork with one child: Flower can inspect the worker while a book is being cropped (with --pool=solo it

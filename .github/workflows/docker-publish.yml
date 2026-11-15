@@ -45,7 +45,8 @@ jobs:
     concurrency:
       group: image-test-${{ github.ref }}
       cancel-in-progress: true
-    # tests/test_shutdown.py: a SIGTERMed worker must hand its task back to a real Redis.
+    # tests/test_end_to_end.py: a real worker against Redis (job name, ?attempt=, the delivery cap). With `CI`
+    # set (GitHub sets it), a missing Redis fails the tests instead of skipping them.
     services:
       redis:
         image: redis:7
