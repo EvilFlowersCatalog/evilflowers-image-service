@@ -9,25 +9,39 @@ from typing import Any
 
 from evilflowers_worker.contract import Region, RegionsJob
 from evilflowers_worker.jobs import LeafJob
+from evilflowers_worker.judges import Judges
 from evilflowers_worker.observability import span
 
 from evilflowers_image.captions import OllamaCaptioner
+from evilflowers_image.decisions import judges_for
 from evilflowers_image.figures import Captioner, FigureReader
 from evilflowers_image.settings import Settings
+
+
+def captioner_for(settings: Settings) -> Captioner | None:
+    return OllamaCaptioner(settings) if settings.captions_enabled else None
 
 
 class FiguresJob(LeafJob[RegionsJob, list[Region]]):
     kind = "figures"
     settings: Settings
 
-    def __init__(self, message: RegionsJob, *, settings: Settings, captioner: Captioner | None = None, **kwargs: Any):
+    def __init__(
+        self,
+        message: RegionsJob,
+        *,
+        settings: Settings,
+        captioner: Captioner | None = None,
+        judges: Judges | None = None,
+        **kwargs: Any,
+    ):
         super().__init__(message, settings=settings, **kwargs)
-        if captioner is None and settings.captions_enabled:
-            captioner = OllamaCaptioner(settings)
-        self.reader = FigureReader(settings, captioner)
+        self.reader = FigureReader(
+            settings, captioner or captioner_for(settings), judges if judges is not None else judges_for(settings)
+        )
 
     def extract(self) -> list[Region]:
-        """Crop, gate and describe the regions. Raising (the PDF cannot be opened) fails the job."""
+        """Crop, gate, decide and describe the regions. Raising (the PDF cannot be opened) fails the job."""
         regions = self.message.regions
         if not regions:
             # An empty batch still reports, so the run can finish; there is nothing to open.

@@ -46,6 +46,7 @@ ENV PATH=/app/.venv/bin:$PATH \
     IMAGE_TAG=${IMAGE_TAG}
 
 # Prefork with one child: Flower can inspect the worker while a book is being cropped (with --pool=solo it
-# cannot), and telemetry starts in the child (worker_process_init).
-CMD ["celery", "-A", "evilflowers_image.worker", "worker", "--loglevel=INFO", "-E", "--concurrency=1", \
-     "--queues=evilflowers_image"]
+# cannot), and telemetry starts in the child (worker_process_init). No --queues: the settings choose them
+# (IMAGE_QUEUE, or with IMAGE_STANDALONE=1 both standalone queues); an interactive-only replica adds
+# `-Q evilflowers_image.standalone.interactive`.
+CMD ["celery", "-A", "evilflowers_image.worker", "worker", "--loglevel=INFO", "-E", "--concurrency=1"]

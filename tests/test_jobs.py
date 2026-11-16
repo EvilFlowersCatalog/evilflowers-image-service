@@ -3,9 +3,10 @@
 import pytest
 from evilflowers_worker.catalog import RunSuperseded
 from evilflowers_worker.contract import RegionsJob
+from evilflowers_worker.judges import Thresholds
 from evilflowers_worker.testing import FakeCatalog, RefusingCatalog, running
 
-from conftest import FIGURE_BOX
+from conftest import FIGURE_BOX, FakeDecider, judges
 from evilflowers_image.jobs import FiguresJob
 
 REGIONS = [{"page": 1, "seq": 1, "bbox": FIGURE_BOX, "caption": "Fig. 1"}]
@@ -56,6 +57,35 @@ def test_the_run_is_read_before_the_work(settings, pdf, state, outcome):
     assert catalog.regions_posted == []
     assert not (settings.storage_path / "runs").exists()
     assert [report["status"] for report in catalog.jobs] == (["superseded"] if outcome == "superseded" else [])
+
+
+def test_the_decision_fields_reach_the_catalog(settings, pdf):
+    catalog = pending()
+    decider = FakeDecider(choose=lambda _n: ("stamp", 0.95))
+    message = {"run_id": "run-1", "source": pdf, "output_dir": "runs/run-1/v1", "regions": REGIONS}
+    figures = FiguresJob(
+        RegionsJob.model_validate(message),
+        settings=settings,
+        catalog=catalog,
+        delivery=1,
+        judges=judges(settings, decider, Thresholds(keep=0.8, hide=0.9)),
+    )
+    assert figures.run() == "done"
+    [posted] = catalog.regions_posted
+    assert {key: posted[key] for key in ("band", "p", "decision", "decider_model", "category")} == {
+        "band": "hide",
+        "p": 0.95,
+        "decision": "stamp",
+        "decider_model": f"{FakeDecider.MODEL}@2610",
+        "category": "stamp",
+    }
+
+
+def test_judges_off_post_no_decision_fields(settings, pdf):
+    catalog = pending()
+    assert job(settings, catalog).run() == "done"
+    [posted] = catalog.regions_posted
+    assert not {"band", "p", "decision", "decider_model"} & posted.keys()
 
 
 def test_captions_enabled_records_the_model(settings, pdf):

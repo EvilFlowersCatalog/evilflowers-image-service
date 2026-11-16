@@ -2,19 +2,22 @@
 
 What the analyzer and the catalog see on the wire: the job name the task reports under (a batch or ``figures``),
 ``?attempt=`` on every write, an empty batch that still reports, and a book that kills its worker ending ``failed``
-after ``MAX_DELIVERIES`` instead of looping forever.
+after ``MAX_DELIVERIES`` instead of looping forever. What the digitalizer sees: a standalone job's outcome file and
+its ``link`` / ``link_error`` callback, with no result backend and no catalog.
 
 Needs ``TEST_REDIS_URL`` (default ``redis://localhost:6379/15``); skipped when no Redis answers, except in CI (``CI``
 set), where a missing Redis is a failure.
 """
 
 import os
+import uuid
 from pathlib import Path
 
 import pytest
-from evilflowers_worker.testing import StubCatalogServer, WorkerProcess, redis_client, wait_for
+from evilflowers_worker.runtime import standalone_callbacks
+from evilflowers_worker.testing import StubCatalogServer, WorkerProcess, assert_outcome, redis_client, wait_for
 
-from conftest import FIGURE_BOX, write_pdf
+from conftest import FIGURE_BOX, write_leaf, write_pdf
 
 REDIS_URL = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 HERE = Path(__file__).parent
@@ -99,6 +102,62 @@ def test_an_empty_batch_reports_done(worker):
 
     assert catalog.paths() == [("GET", RUN), ("POST", f"{RUN}/jobs/figures:0009-0016?attempt=3")]
     assert catalog.calls[1][2]["status"] == "done"
+
+
+@pytest.fixture
+def standalone(broker, storage):
+    """A running ``IMAGE_STANDALONE=1`` worker on a queue of its own, no catalog; its callback queue."""
+    queue = f"test-{uuid.uuid4().hex[:8]}"
+    callbacks = f"{queue}-portal"
+    env = {"STORAGE_PATH": str(storage), "IMAGE_STANDALONE": "1", "STANDALONE_QUEUE": queue}
+    process = WorkerProcess("evilflowers_image.worker", redis_url=broker, pythonpath=[str(HERE)], env=env, queue=queue)
+    with process:
+        process.wait_ready()
+        yield process, callbacks
+        process.redis.delete(callbacks)
+
+
+def send_standalone(process: WorkerProcess, callbacks: str, storage: Path, **change) -> None:
+    write_leaf(storage / "book/leaves/0001.png", variant=0)
+    kwargs = {
+        "run_id": "42",
+        "job": "figures-0001-a1",
+        "token": "secret-token",
+        "leaves": [{"leaf": 1, "image": "book/leaves/0001.png"}],
+        "regions": [{"leaf": 1, "kind": "picture", "seq": 0, "bbox": [1 / 6, 0.375, 5 / 6, 0.875]}],
+        "output_dir": "book/_studio/jobs/figures-0001-a1",
+        "outcome": "book/_studio/jobs/figures-0001-a1/outcome.json",
+        **change,
+    }
+    signatures = standalone_callbacks(
+        process.producer(), done="digitalizer.job_done", failed="digitalizer.job_failed", queue=callbacks, job_id="j1"
+    )
+    process.send_task("evilflowers_image.standalone.figures", kwargs, **signatures)
+
+
+def test_a_standalone_job_writes_its_outcome_and_fires_link(standalone, storage):
+    process, callbacks = standalone
+    send_standalone(process, callbacks, storage)
+    assert wait_for(lambda: process.queued(callbacks), 60), process.output
+
+    [message] = process.queued(callbacks)
+    assert message["headers"]["task"] == "digitalizer.job_done"
+    assert process.args(message) == [{"job": "figures-0001-a1", "figures": 1}]
+    assert process.kwargs(message) == {"job_id": "j1"}
+    assert_outcome(storage, "book/_studio/jobs/figures-0001-a1/outcome.json", token="secret-token", status="done",
+                   after="book/_studio/jobs/figures-0001-a1/figures.json")  # fmt: skip
+
+
+def test_a_failing_standalone_job_writes_failed_and_fires_link_error(standalone, storage):
+    process, callbacks = standalone
+    send_standalone(process, callbacks, storage, leaves=[{"leaf": 1, "image": "book/leaves/missing.png"}])
+    assert wait_for(lambda: process.queued(callbacks), 60), process.output
+
+    [message] = process.queued(callbacks)
+    assert message["headers"]["task"] == "digitalizer.job_failed"
+    assert process.kwargs(message) == {"job_id": "j1"}
+    outcome = assert_outcome(storage, "book/_studio/jobs/figures-0001-a1/outcome.json", status="failed")
+    assert "no image" in outcome["error"]
 
 
 def test_a_book_that_kills_its_worker_ends_failed_after_the_cap(worker):

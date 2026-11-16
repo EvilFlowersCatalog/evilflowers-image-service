@@ -1,5 +1,8 @@
-"""The task name, queue and worker settings are a contract with the analyzer and the catalog's routing."""
+"""The task names, queues and worker settings are a contract with the analyzer, the digitalizer and the catalog's
+routing."""
 
+import pytest
+from evilflowers_worker.judges import Judges
 from evilflowers_worker.runtime import create_app
 from evilflowers_worker.settings import VISIBILITY_TIMEOUT
 
@@ -7,10 +10,51 @@ from evilflowers_image.settings import Settings
 from evilflowers_image.worker import app
 
 
-def test_the_figures_task_is_registered_under_its_contract_name():
+@pytest.mark.parametrize("name", ["evilflowers_image.figures", "evilflowers_image.standalone.figures"])
+def test_the_figures_tasks_are_registered_under_their_contract_names(name):
     app.loader.import_default_modules()
-    task = app.tasks["evilflowers_image.figures"]
+    task = app.tasks[name]
     assert task.acks_late and task.reject_on_worker_lost
+
+
+def test_the_standalone_worker_consumes_both_standalone_queues_interactive_first(monkeypatch):
+    monkeypatch.setenv("IMAGE_STANDALONE", "1")
+    settings = Settings(_env_file=None)
+    assert settings.catalog_api_key is None
+    assert settings.queues() == ["evilflowers_image.standalone.interactive", "evilflowers_image.standalone"]
+    conf = create_app(
+        "image",
+        settings,
+        include=["evilflowers_image.tasks"],
+        queues=settings.queues(),
+        routes={"evilflowers_image.standalone.*": settings.standalone_queue},
+    ).conf
+    assert [queue.name for queue in conf.task_queues] == settings.queues()
+    assert conf.task_routes == {"evilflowers_image.standalone.*": {"queue": "evilflowers_image.standalone"}}
+
+
+def test_the_decider_reads_the_variables_the_cluster_sets(monkeypatch):
+    for name, value in {
+        "DECIDER_ENABLED": "true",
+        "DECIDER_VISION_URL": "http://decider-vision.shared.svc.cluster.local",
+        "DECIDER_TIMEOUT": "30",
+        "JUDGE_THRESHOLDS": '{"figure_kind": {"keep": 0.8, "hide": 0.9}}',
+        "REPEAT_MIN_PAGES": "4",
+    }.items():
+        monkeypatch.setenv(name, value)
+    settings = Settings(_env_file=None)
+    assert settings.judges_enabled and settings.decider_timeout == 30
+    assert settings.judge_thresholds["figure_kind"].hide == 0.9
+    assert settings.repeat_min_pages == 4
+    vision = Judges.from_settings(settings).decider_vision
+    assert vision is not None and vision.url == "http://decider-vision.shared.svc.cluster.local"
+
+
+def test_decider_variables_left_empty_mean_off(monkeypatch):
+    for name in ("DECIDER_ENABLED", "DECIDER_VISION_URL", "JUDGE_THRESHOLDS"):
+        monkeypatch.setenv(name, "")
+    settings = Settings(_env_file=None)
+    assert not settings.judges_enabled and Judges.from_settings(settings).decider_vision is None
 
 
 def test_queue_routing_and_delivery_semantics():

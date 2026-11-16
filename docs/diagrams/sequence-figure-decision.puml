@@ -1,0 +1,38 @@
+@startuml sequence-figure-decision
+!include elvira.iuml
+' What: both figures tasks crop and gate every region, hide page furniture repeated across pages without a model, and ask decider-vision for a category and a band for the rest; a judge that does not answer leaves the region unbanded, never fails the job.
+' Kind: UML sequence diagram, one figures job. Scope: image-service's side; the analyzer, the catalog and the digitalizer appear only as senders and receivers.
+' Source: issues evilflowers-image-service#6 and #7, evilflowers-worker#5/#6/#7 (kit e530f68), EvilFlowersCatalog#189, knowledge#64 (2026-11-16)
+title Figure keep/hide in both figures tasks (image-service#6, #7, 2026-11-16)
+participant "analyzer\n(catalog run)" as analyzer
+participant "digitalizer\norchestrator" as orch <<proposed>>
+participant "FigureReader\n(figures.py)" as reader <<focus>>
+database "STORAGE_PATH" as storage
+participant "decider-vision\nPOST /v1/systemone" as decider <<proposed>>
+participant "catalog\n/extraction/v1" as catalog
+
+alt catalog task evilflowers_image.figures
+  analyzer -> reader : RegionsJob {run_id, source PDF, output_dir, regions}
+else standalone task evilflowers_image.standalone.figures
+  orch -> reader : StandaloneFiguresJob {run_id, job, token, leaves, regions, output_dir, outcome}\n+ link / link_error
+end
+loop pass 1: every region
+  reader -> storage : render at CROP_DPI, gate (size, aspect, coverage), write WebP crop
+  reader -> reader : dHash of the crop
+end
+reader -> reader : same dHash on >= REPEAT_MIN_PAGES pages:\nband hide, decision repeated (no model)
+loop pass 2: every region not repeated (job budget, circuit breaker)
+  reader -[$accent_msg()]> decider : <b>figure_kind</b> choice + crop (PNG, <= 448 px)
+  decider --> reader : choice, p, model
+  reader -> reader : band from JUDGE_THRESHOLDS (none until knowledge#65);\ncategory = choice
+end
+alt catalog task
+  reader -> catalog : POST /regions (band, p, decision, decider_model)
+  reader -> catalog : POST /jobs/<job> done
+else standalone task
+  reader -> storage : figures.json, then the outcome file (last, atomic)
+  reader --> orch : link: {job, figures}
+end
+caption decider-vision unreachable, refused, over budget or DECIDER_ENABLED off: the region is posted without a band, as before\n(image_judge_total{outcome}). Every crop is written whatever its band; review becomes a disputed region in the page studio.
+footer ELVIRA · FIIT STU · evilflowers-image-service · docs/diagrams/sequence-figure-decision.puml
+@enduml

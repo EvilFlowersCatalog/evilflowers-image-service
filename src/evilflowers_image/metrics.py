@@ -7,7 +7,10 @@ Attributes stay low-cardinality: never a run id, a document id or a batch job na
 from evilflowers_worker.observability.metrics import Instrument
 
 REGIONS = Instrument(
-    "counter", "{service}.figures.regions", "{region}", "Figure regions handled, by outcome (kept, a gate, error)"
+    "counter",
+    "{service}.figures.regions",
+    "{region}",
+    "Figure regions handled, by outcome (kept, repeated, a gate, error)",
 )
 CAPTION_DURATION = Instrument(
     "histogram", "{service}.caption.duration", "s", "Time to describe one figure through the Ollama endpoint"
@@ -15,7 +18,8 @@ CAPTION_DURATION = Instrument(
 
 
 def record_region(outcome: str) -> None:
-    """``outcome``: kept, error, or the gate that dropped it (``too small`` → ``too_small``)."""
+    """``outcome``: kept, repeated (posted, hidden as page furniture), error, or the gate that dropped it
+    (``too small`` → ``too_small``). The decider's answers are the kit's ``image_judge_total``."""
     REGIONS.add(1, {"outcome": outcome.replace(" ", "_")})
 
 
